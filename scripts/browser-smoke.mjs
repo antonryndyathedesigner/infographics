@@ -1,0 +1,46 @@
+import { chromium } from 'playwright';
+import assert from 'node:assert/strict';
+import * as XLSX from 'xlsx';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+const server=spawn(process.execPath,['node_modules/vite/bin/vite.js','preview','--host','127.0.0.1','--port','4175','--strictPort'],{stdio:'ignore'});
+let browser;
+try {
+  let ready=false;
+  for(let i=0;i<100;i++){try{const response=await fetch('http://127.0.0.1:4175');if(response.ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,100));}
+  if(!ready)throw new Error('Preview server failed to start. Run npm run build first.');
+  browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),headless:true,args:['--no-sandbox']});
+const page=await browser.newPage({viewport:{width:1440,height:1100}});
+const errors=[];page.on('pageerror',e=>errors.push(e.message));
+await page.goto('http://127.0.0.1:4175');await page.waitForSelector('#chart-preview svg');
+await page.screenshot({path:'/tmp/forma-desktop.png',fullPage:true});
+await page.click('#generate');await page.waitForFunction(()=>document.querySelector('#preview-label').textContent==='ВАША ИНФОГРАФИКА');
+assert.equal(await page.locator('[data-variant]').count(),3);
+await page.click('[data-variant="2"]');assert.match(await page.locator('#chart-preview').textContent(),/ДОЛЯ В ОБЩЕЙ СУММЕ/);
+await page.fill('#palette-input','#INVALID');await page.click('#generate');assert.match(await page.locator('#toast').textContent(),/некорректный HEX/);
+await page.fill('#palette-input','#EE5522 #334455');
+await page.setInputFiles('#data-input',{name:'данные.csv',mimeType:'text/csv',buffer:Buffer.from('Название;Значение\nАльфа;42\nБета;18\nГамма;30')});
+await page.waitForFunction(()=>document.querySelector('#filename').textContent==='данные.csv');
+await page.fill('#chart-title','Тестовая инфографика');await page.fill('#details-input','Данные за 2026 год');await page.click('#generate');
+assert.match(await page.locator('#chart-preview').textContent(),/Альфа/);assert.match(await page.locator('#chart-preview').textContent(),/42/);assert.match(await page.locator('#chart-preview').textContent(),/Данные за 2026 год/);
+const svgDownload=page.waitForEvent('download');await page.click('#export-svg');const svg=await svgDownload;assert.match(svg.suggestedFilename(),/\.svg$/);
+const pngDownload=page.waitForEvent('download');await page.click('#export-png');const png=await pngDownload;assert.match(png.suggestedFilename(),/\.png$/);
+await page.click('[data-page="library"]');await page.waitForSelector('.library-panel');await page.click('[data-page="studio"]');assert.equal(await page.inputValue('#chart-title'),'Тестовая инфографика');
+await page.setInputFiles('#reference-input',{name:'reference.png',mimeType:'image/png',buffer:await page.locator('#chart-preview').screenshot()});
+await page.waitForFunction(()=>document.querySelectorAll('[data-remove]').length===1);console.log('Reference upload passed');
+await page.reload();await page.waitForSelector('[data-remove]');assert.equal(await page.locator('.reference-card').count(),4);
+await page.click('[data-remove]');assert.equal(await page.locator('.reference-card').count(),3);
+await page.setViewportSize({width:390,height:844});await page.screenshot({path:'/tmp/forma-mobile.png',fullPage:true});
+assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
+assert.deepEqual(errors,[]);
+console.log('PASS: generation, variants, palette validation, CSV import, SVG/PNG export, navigation, reference persistence/deletion, mobile overflow; no browser exceptions.');
+const wb=XLSX.utils.book_new();const ws=XLSX.utils.aoa_to_sheet([['Тип','Доля'],['Первая',.38],['Вторая',.62]]);ws.B2.z='0%';ws.B3.z='0%';XLSX.utils.book_append_sheet(wb,ws,'Проценты');XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['Название','Значение'],['Второй лист',99]]),'Другой');
+await page.setInputFiles('#data-input',{name:'test.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:XLSX.write(wb,{type:'buffer',bookType:'xlsx'})});
+await page.waitForSelector('#sheet-select');await page.click('#generate');assert.match(await page.locator('#chart-preview').textContent(),/38 %/);assert.match(await page.locator('#chart-preview').textContent(),/62 %/);
+await page.selectOption('#sheet-select','Другой');await page.click('[data-select="demo-1"]');assert.equal(await page.inputValue('#sheet-select'),'Другой');await page.click('#generate');assert.match(await page.locator('#chart-preview').textContent(),/Второй лист/);
+await page.setInputFiles('#data-input',{name:'text.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify([{Принцип:'Ясность',Описание:'Показывать только то, что важно.'},{Принцип:'Точность',Описание:'Данные без искажений.'}]))});await page.waitForFunction(()=>document.querySelector('#filename').textContent==='text.json');await page.click('#generate');assert.match(await page.locator('#chart-preview').textContent(),/Ясность/);assert.match(await page.locator('#chart-preview').textContent(),/Данные без искажений/);await page.click('[data-variant="2"]');assert.match(await page.locator('#preview-caption').textContent(),/МОДУЛЬНАЯ/);
+await page.setInputFiles('#data-input',{name:'signed.csv',mimeType:'text/csv',buffer:Buffer.from('Name,Value\nMinus,-25\nPlus,50\nZero,0')});await page.waitForFunction(()=>document.querySelector('#filename').textContent==='signed.csv');await page.click('#generate');await page.click('[data-variant="2"]');assert.match(await page.locator('#chart-preview').textContent(),/ОТНОСИТЕЛЬНО НУЛЯ/);assert.ok(!(await page.locator('#chart-preview').innerHTML()).includes('NaN'));
+await page.fill('#palette-input',Array(21).fill('#fff').join(' '));await page.click('#generate');assert.match(await page.locator('#toast').textContent(),/не более 20/);
+assert.deepEqual(errors,[]);
+console.log('PASS: Excel percentages and sheet selection, text JSON layouts, signed/zero values and color limit.');
+} finally {if(browser)await browser.close();server.kill();}
