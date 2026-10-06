@@ -9,7 +9,9 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "node --test",
     "test:browser": "npm run build && node scripts/browser-smoke.mjs",
-    "build:pages": "vite build --base=/infographics/"
+    "build:pages": "vite build --base=/infographics/",
+    "dev:api": "node --env-file-if-exists=.env.local server/dev.js",
+    "test:ai-browser": "node scripts/semantic-browser-smoke.mjs"
   },
   "dependencies": {
     "@fontsource/manrope": "^5.3.0",
