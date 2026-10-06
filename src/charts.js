@@ -1,112 +1,60 @@
 import {escapeText as esc} from './data.js';
-const num = n => new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 2}).format(n);
-const short = (s, len = 31) => s.length > len ? s.slice(0, len - 1) + '…' : s;
-export function makeChart(data, options, variant = 0) {
-  const {title, subtitle, palette, unit = '', source = '', fontWeight = 600} = options;
-  const colors = palette.length ? palette : ['#D8E568', '#B8C9BA', '#C3C5CF', '#E0CCB3', '#BDBDB6'];
-  const width = 960, height = Math.max(720, variant === 2 ? 480 + data.length * 36 : 340 + data.length * (variant === 1 ? 67 : 55));
-  const ink = '#20221F', muted = '#777B71', paper = '#FAFAF6';
-  let body = '';
-  const t = (x, y, str, size = 16, attrs = '') => `<text x="${x}" y="${y}" font-size="${size}" ${attrs}>${esc(str)}</text>`;
-  const rect = (x,y,w,h,fill,attrs='') => `<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${h}" fill="${fill}" ${attrs}/>`;
-  const max = Math.max(...data.map(d=>Math.abs(d.value)), 1);
-  const sum = data.reduce((a,d)=>a+d.value,0);
-  body += t(52, 53, 'FORMA / DATA STUDY', 12, 'letter-spacing="2"');
-  body += t(908, 53, `0${variant+1} — ${['COMPARISON','INDEX','DISTRIBUTION'][variant]}`, 11, 'text-anchor="end" letter-spacing="1"');
-  body += `<path d="M52 77H908" stroke="${ink}" stroke-width="1"/>`;
-  body += t(52, 129, short(title || 'Обзор данных', 44), 35, `font-weight="${fontWeight}" letter-spacing="-1.2"`);
-  body += t(52, 159, short(subtitle || 'Каждое число — часть общей картины.', 84), 15, `fill="${muted}"`);
-  const display = value => num(value) + (unit ? ' ' + unit : '');
-  if (variant === 0) {
-    const signed = data.some(d=>d.value<0);
-    const barStart = signed ? 580 : 335, span = signed ? 205 : 490;
-    body += t(52, 209, 'НАПРАВЛЕНИЕ', 10, `letter-spacing="1.5" fill="${muted}"`);
-    body += t(908, 209, 'ЗНАЧЕНИЕ', 10, `text-anchor="end" letter-spacing="1.5" fill="${muted}"`);
-    data.forEach((d,i)=>{
-      const y = 233 + i * 55;
-      body += `<path d="M52 ${y+40}H908" stroke="#E5E6DE"/>`;
-      body += t(52,y+25,short(d.label),15);
-      const w = Math.abs(d.value)/max * span;
-      body += rect(d.value<0 ? barStart-w : barStart,y+5,w,28,colors[i%colors.length]);
-      body += t(908,y+25,display(d.value),17,'text-anchor="end" font-weight="500"');
-    });
-    if (signed) body += `<path d="M${barStart} 233V${233+data.length*55}" stroke="${muted}"/>`;
-  } else if (variant === 1) {
-    body += t(52,220,'КАРТА ПОКАЗАТЕЛЕЙ',10,`letter-spacing="1.5" fill="${muted}"`);
-    data.forEach((d,i)=>{
-      const y=246+i*67;
-      body += rect(52,y,5,47,colors[i%colors.length]);
-      body += t(78,y+15,String(i+1).padStart(2,'0'),11,`fill="${muted}"`);
-      body += t(124,y+31,short(d.label,39),20);
-      body += t(908,y+32,display(d.value),32,'text-anchor="end" letter-spacing="-1"');
-      body += `<path d="M78 ${y+53}H908" stroke="#E5E6DE"/>`;
-    });
-  } else {
-    const validShare = data.every(d=>d.value>=0) && sum>0;
-    if(validShare) {
-      let x = 52;
-      data.forEach((d,i)=>{
-        const w=d.value/sum*856;
-        body+=rect(x,214,w,110,colors[i%colors.length]); x+=w;
-      });
-      body+=t(52,355,'ДОЛЯ В ОБЩЕЙ СУММЕ',10,`letter-spacing="1.5" fill="${muted}"`);
-      data.forEach((d,i)=>{
-        const y=392+i*36;
-        body+=rect(52,y-12,10,10,colors[i%colors.length]);
-        body+=t(78,y,short(d.label,45),15);
-        body+=t(760,y,display(d.value),15,'text-anchor="end"');
-        body+=t(908,y,num(d.value/sum*100)+'%',15,'text-anchor="end" font-weight="600"');
-      });
-    } else {
-      body+=t(52,220,'ЗНАЧЕНИЯ ОТНОСИТЕЛЬНО НУЛЯ',10,`letter-spacing="1.5" fill="${muted}"`);
-      data.forEach((d,i)=>{
-        const y=260+i*48;
-        body+=t(52,y,short(d.label),15);
-        body+=`<path d="M340 ${y-6}H825" stroke="#E5E6DE"/>`;
-        const x=582+d.value/max*230;
-        body+=`<circle cx="${x}" cy="${y-6}" r="7" fill="${colors[i%colors.length]}"/>`;
-        body+=t(908,y,display(d.value),16,'text-anchor="end"');
-      });
-      body+=`<path d="M582 239V${270+data.length*48}" stroke="${muted}" stroke-dasharray="3 5"/>`;
-    }
+const number=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(n);
+export const layoutNames={bars:'Полосы',columns:'Столбцы',donut:'Кольцевая',cards:'Карточки',overview:'Обзор',editorial:'Текст',modules:'Модули'};
+export function actualLayout(data,options,variant){
+  const layout=options.layouts?.[variant]||['bars','cards','donut'][variant];
+  if(layout==='donut'&&(data.some(d=>d.value<0)||data.reduce((a,d)=>a+d.value,0)<=0))return 'bars';
+  if(layout==='columns'&&data.length>12)return 'bars';
+  return layout;
+}
+function wrap(text,max){
+  const lines=[];let current='';
+  for(let word of String(text||'').split(/\s+/)){while(word.length>max){if(current){lines.push(current);current='';}lines.push(word.slice(0,max));word=word.slice(max);}if((current+' '+word).trim().length>max){lines.push(current);current=word;}else current=(current+' '+word).trim();}
+  if(current)lines.push(current);return lines;
+}
+function canvas(options,height){
+  const {title='',subtitle='',palette=[],fontScale=1,hidden={},ink='#20221F',background='#FAFAF7',fontWeight=500}=options;
+  const colors=palette.length?palette:['#20221F','#9A9A94','#D1D1CB'];
+  const text=(x,y,value,size=16,attrs='')=>`<text x="${x}" y="${y}" font-size="${size*fontScale}" ${attrs}>${esc(value)}</text>`;
+  const line=(x,y,end)=>hidden.grid?'':`<path d="M${x} ${y}H${end}" stroke="${ink}" opacity=".13"/>`;
+  const heading=hidden.title?'':wrap(title,Math.floor(43/fontScale)).map((s,i)=>text(48,65+i*44*fontScale,s,32,`font-weight="${fontWeight}"`)).join('');
+  const titleLines=hidden.title?0:wrap(title,Math.floor(43/fontScale)).length;
+  const top=titleLines?78+titleLines*44*fontScale:48;
+  const sub=subtitle?wrap(subtitle,Math.floor(90/fontScale)).map((s,i)=>text(48,top+i*22*fontScale,s,15,'opacity=".6"')).join(''):'';
+  const start=top+(subtitle?wrap(subtitle,Math.floor(90/fontScale)).length*22*fontScale+32:20);
+  return {colors,text,line,start,finish:body=>`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="${Math.ceil(height+start)}" viewBox="0 0 960 ${Math.ceil(height+start)}" role="img" aria-label="${esc(title||'Инфографика')}"><rect width="960" height="100%" fill="${background}"/><g fill="${ink}" font-family="Arial, Helvetica, sans-serif">${heading}${sub}${body}</g></svg>`};
+}
+export function makeChart(data,options,variant=0){
+  const layout=actualLayout(data,options,variant), hidden=options.hidden||{}, scale=options.fontScale||1;
+  const spacing=(options.spacing||1)*(1.25-(options.density||.3)*.5);
+  const rowHeights=data.map(d=>Math.max(64,wrap(d.label,Math.floor(29/scale)).length*23*scale+30)*spacing);
+  const gridHeights=[];for(let i=0;i<data.length;i+=3)gridHeights.push(Math.max(...data.slice(i,i+3).map(d=>wrap(d.label,Math.floor(25/scale)).length*23*scale+90))*spacing);
+  const h=layout==='bars'?rowHeights.reduce((a,b)=>a+b,0)+48:layout==='cards'?gridHeights.reduce((a,b)=>a+b,0)+48:layout==='donut'?Math.max(450,rowHeights.reduce((a,b)=>a+b,0))+48:500;
+  const {colors,text,line,start,finish}=canvas(options,h);let body='';
+  const color=i=>colors[i%colors.length], max=Math.max(1,...data.map(d=>Math.abs(d.value))),sum=data.reduce((a,d)=>a+d.value,0);
+  const val=d=>number(d.value)+(options.unit?' '+options.unit:'');
+  const rect=(x,y,w,h,c)=>`<rect x="${x}" y="${y}" width="${Math.max(0,w)}" height="${Math.max(0,h)}" fill="${c}"/>`;
+  const labels=(x,y,label,maxChars,size=15,attrs='')=>hidden.labels?'':wrap(label,maxChars).map((s,i)=>text(x,y+i*23*scale,s,size,attrs)).join('');
+  if(layout==='bars'){
+    const signed=data.some(d=>d.value<0),zero=signed?590:340,span=signed?190:450;let y=start;
+    if(signed&&!hidden.grid)body+=`<path d="M590 ${start}V${start+h-48}" stroke="${options.ink||'#20221F'}" opacity=".3" stroke-dasharray="3 5"/>`;
+    data.forEach((d,i)=>{const w=Math.abs(d.value)/max*span;body+=labels(48,y+24,d.label,Math.floor(29/scale));body+=rect(d.value<0?zero-w:zero,y+4,w,28,color(i));if(!hidden.values)body+=text(912,y+26,val(d),16,'text-anchor="end"');body+=line(48,y+rowHeights[i]-14,912);y+=rowHeights[i];});
+  }else if(layout==='cards'){
+    let y=start;data.forEach((d,i)=>{const x=48+i%3*296;body+=rect(x,y,5,37,color(i));if(!hidden.values)body+=text(x+18,y+31,val(d),30,`font-weight="${options.fontWeight||500}"`);body+=labels(x+18,y+65,d.label,Math.floor(25/scale));body+=line(x,y+gridHeights[Math.floor(i/3)]-20,x+264);if(i%3===2)y+=gridHeights[Math.floor(i/3)];});
+  }else if(layout==='columns'){
+    const signed=data.some(d=>d.value<0),baseline=start+(signed?200:340),slot=864/data.length,span=signed?170:300;
+    body+=line(48,baseline,912);data.forEach((d,i)=>{const x=48+i*slot,barW=Math.min(80,slot*.65),barH=Math.abs(d.value)/max*span;body+=rect(x+(slot-barW)/2,d.value>=0?baseline-barH:baseline,barW,barH,color(i));if(!hidden.values)body+=text(x+slot/2,d.value>=0?baseline-barH-12:baseline+barH+25,val(d),12,'text-anchor="middle"');body+=labels(x+slot/2,start+420,d.label,Math.floor(slot/(8*scale)),12,'text-anchor="middle"');});
+  }else{
+    const cx=250,cy=start+195,r=148,circ=2*Math.PI*r;let offset=0;data.forEach((d,i)=>{const length=d.value/sum*circ;body+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color(i)}" stroke-width="50" stroke-dasharray="${length} ${circ-length}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`;offset+=length;});
+    let y=start+20;data.forEach((d,i)=>{body+=rect(490,y+9,10,10,color(i));body+=labels(516,y+23,d.label,Math.floor(27/scale));if(!hidden.values)body+=text(912,y+23,val(d),15,'text-anchor="end"');y+=rowHeights[i];});
   }
-  body+=`<path d="M52 ${height-72}H908" stroke="${ink}"/>`;
-  body+=t(52,height-43,short(source || 'Источник: загруженная таблица',95),11,`fill="${muted}"`);
-  body+=t(908,height-43,`${data.length} ПОКАЗАТЕЛЕЙ`,10,'text-anchor="end" letter-spacing="1"');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(title)}"><rect width="${width}" height="${height}" fill="${paper}"/><g font-family="Arial, Helvetica, sans-serif" fill="${ink}">${body}</g></svg>`;
+  return finish(body);
 }
-export function referenceArt(index) {
-  const colors = [['#D8E568','#22251F'],['#DDBEAA','#4F6257'],['#BBC5D1','#24272B']][index];
-  const motifs = [
-    `<text x="18" y="37" font-size="11" letter-spacing="2">FORM &amp; FUNCTION</text><text x="16" y="105" font-size="69" letter-spacing="-5">68</text><rect x="18" y="130" width="172" height="34" fill="${colors[0]}"/><rect x="18" y="169" width="122" height="16" fill="${colors[1]}"/><rect x="18" y="191" width="74" height="8" fill="${colors[1]}"/>`,
-    `<text x="18" y="34" font-size="10" letter-spacing="2">THE BALANCE STUDY</text><circle cx="105" cy="118" r="63" fill="${colors[0]}"/><path d="M105 55A63 63 0 0 1 168 118H105Z" fill="${colors[1]}"/><circle cx="105" cy="118" r="28" fill="#F5F4EF"/><text x="18" y="213" font-size="11">Less, but better.</text>`,
-    `<text x="18" y="34" font-size="10" letter-spacing="2">A SYSTEM OF THINGS</text><rect x="18" y="58" width="79" height="79" fill="${colors[0]}"/><rect x="105" y="58" width="79" height="79" fill="${colors[1]}"/><rect x="18" y="145" width="79" height="60" fill="${colors[1]}"/><path d="M105 145H184M105 155H184M105 165H184M105 175H184M105 185H184M105 195H160" stroke="${colors[1]}"/>`
-  ];
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="210" height="240" viewBox="0 0 210 240"><rect width="210" height="240" fill="#F5F4EF"/><g fill="${colors[1]}" font-family="Arial, sans-serif">${motifs[index]}</g></svg>`;
-}
-
-export function makeTextChart(data, options, variant = 0) {
-  const {title='Обзор данных',subtitle='',palette=[],source='',fontWeight=600}=options;
-  const colors=palette.length?palette:['#D8E568','#B8C9BA','#C3C5CF'];
-  const columns=variant===2?2:1, columnWidth=columns===2?408:856;
-  const wrap=(text,max)=>{
-    const words=String(text).split(/\s+/),lines=[];let line='';
-    for(let word of words){while(word.length>max){if(line){lines.push(line);line='';}lines.push(word.slice(0,max));word=word.slice(max);}if((line+' '+word).trim().length>max){lines.push(line);line=word;}else line=(line+' '+word).trim();}if(line)lines.push(line);return lines;
-  };
-  const blocks=data.map(d=>({heading:wrap(d.label,columns===2?27:variant===0?26:60),body:wrap(d.text,columns===2?43:variant===0?61:90)}));
-  const rows=[];for(let i=0;i<blocks.length;i+=columns){const group=blocks.slice(i,i+columns);rows.push({group,offset:i,height:Math.max(...group.map(b=>variant===0?Math.max(b.heading.length*24,b.body.length*22)+48:b.heading.length*26+b.body.length*22+62))});}
-  const height=Math.max(720,280+rows.reduce((sum,r)=>sum+r.height,0));
-  const text=(x,y,value,size=16,attrs='')=>`<text x="${x}" y="${y}" font-size="${size}" ${attrs}>${esc(value)}</text>`;
-  let body=text(52,53,'FORMA / TEXT STUDY',12,'letter-spacing="2"')+text(908,53,`0${variant+1} — ${['OVERVIEW','EDITORIAL','MODULES'][variant]}`,11,'text-anchor="end" letter-spacing="1"')+`<path d="M52 77H908" stroke="#20221F"/>`;
-  body+=text(52,129,short(title,44),35,`font-weight="${fontWeight}" letter-spacing="-1.2"`)+text(52,159,short(subtitle||'Идеи, собранные в ясную систему.',84),15,'fill="#777B71"');
-  let y=216;
-  for(const row of rows){row.group.forEach((b,j)=>{
-    const i=row.offset+j,x=52+j*448;
-    body+=`<rect x="${x}" y="${y-13}" width="${variant===2?columnWidth:4}" height="${variant===2?4:row.height-30}" fill="${colors[i%colors.length]}"/>`;
-    if(variant===0){b.heading.forEach((line,k)=>body+=text(x+22,y+k*24,line,18,'font-weight="600"'));b.body.forEach((line,k)=>body+=text(365,y+k*22,line,16,'fill="#59604F"'));}
-    else{const top=y+(variant===2?18:0);b.heading.forEach((line,k)=>body+=text(x+(variant===2?0:22),top+k*26,line,21,'font-weight="600"'));b.body.forEach((line,k)=>body+=text(x+(variant===2?0:22),top+b.heading.length*26+8+k*22,line,16,'fill="#59604F"'));}
-    body+=`<path d="M${x} ${y+row.height-27}H${x+columnWidth}" stroke="#E5E6DE"/>`;
-  });y+=row.height;}
-  body+=`<path d="M52 ${height-72}H908" stroke="#20221F"/>`+text(52,height-43,short(source,95),11,'fill="#777B71"')+text(908,height-43,`${data.length} ЗАПИСЕЙ`,10,'text-anchor="end" letter-spacing="1"');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="${height}" viewBox="0 0 960 ${height}" role="img" aria-label="${esc(title)}"><rect width="960" height="${height}" fill="#FAFAF6"/><g font-family="Arial, Helvetica, sans-serif" fill="#20221F">${body}</g></svg>`;
+export function makeTextChart(data,options,variant=0){
+  const scale=options.fontScale||1,hidden=options.hidden||{},columns=variant===2?2:1;
+  const sizes=data.map(d=>Math.max(70,((hidden.labels?0:wrap(d.label,Math.floor((columns===2?30:60)/scale)).length)*28*scale+(hidden.values?0:wrap(d.text,Math.floor((columns===2?42:88)/scale)).length)*22*scale+45)*(options.spacing||1)));
+  const groups=[];for(let i=0;i<sizes.length;i+=columns)groups.push(Math.max(...sizes.slice(i,i+columns)));
+  const {colors,text,line,start,finish}=canvas(options,groups.reduce((a,b)=>a+b,0)+48);let body='',y=start;
+  data.forEach((d,i)=>{const x=48+(i%columns)*448,w=columns===2?416:864,blockH=groups[Math.floor(i/columns)];body+=`<rect x="${x}" y="${y}" width="${variant===1?4:w}" height="${variant===1?blockH-20:4}" fill="${colors[i%colors.length]}"/>`;let top=y+30;if(!hidden.labels){const lines=wrap(d.label,Math.floor((columns===2?30:60)/scale));lines.forEach((s,j)=>body+=text(x+12,top+j*28*scale,s,21,`font-weight="${options.fontWeight||500}"`));top+=lines.length*28*scale+10;}if(!hidden.values)wrap(d.text,Math.floor((columns===2?42:88)/scale)).forEach((s,j)=>body+=text(x+12,top+j*22*scale,s,16,'opacity=".7"'));body+=line(x,y+blockH-12,x+w);if(i%columns===columns-1)y+=blockH;});
+  return finish(body);
 }
